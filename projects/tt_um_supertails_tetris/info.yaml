@@ -25,17 +25,76 @@ yaml_version: 4
 # Here is a great example: https://github.com/davidsiaw/tt02-davidsiaw-stackcalc/blob/38c5647f83aad2aec675d566aa3d67b98f0aac81/info.yaml
 documentation: 
   author:       "Carson Swoveland"      # Your name
-  title:        "Tetris"      # Project title
+  title:        "Cleary Line Game"      # Project title
   language:     "SystemVerilog" # other examples include Verilog, Amaranth, VHDL, etc
   description:  "Implements the second-most-popular game of all time in hardware"      # Short description of what your project does
 
 # Longer description of how the project works. You can use standard markdown format.
   how_it_works: |
-      Explain how your project works
+      This project implements a game in which 4-tile pieces fall from the top of the screen
+      and land at the bottom.
+      Filling up a row of the grid clears that row.
+      Any resemblance to famous 1985 games is purely coincidental.
+
+      All gameplay logic is synchronized to the VGA output,
+      which uses a very nonstandard resolution due to PLL limitations on my test FPGA.
+      There's only enough area to maintain a ring buffer containing the current row of placed tiles (call it the "row buffer")
+      along with whatever game piece is currently falling (the "falling piece").
+
+      On alternating frames the player is allowed to move the falling piece and collisions are checked.
+
+      As the "scanning beam" moves along, the row buffer is shifted around in a loop.
+      Checking for collisions and full rows is done one tile at a time just on the head of the row buffer.
+      If, by the end of the frame, any collision has occurred, the previous move is undone.
+      The falling piece is also possibly written to the grid and replaced with a new falling piece (more on that later).
+      If any rows are full, the entire grid above that row gets written downwards.
+
+      The grid data is stored externally. I used a Teensy 4.1 as my external memory,
+      because I didn't have enough area, pins, or time to actually implement an SPI SRAM interface.
+      The external memory is double-buffered, and the game reads from- and writes to- alternating buffers on every frame.
+      This is so that, when a row is cleared, we can write rows downwards without overwriting any data.
+
+      The memory interface uses a somewhat strange protocol.
+      There are three control pins in addition to a 3.125 MHz clock and address/data lines:
+      - Start
+      - Continue
+      - Write Enable
+      Everything is rising-edge-triggered.
+      At the beginning of a row access, the ASIC will:
+      - hold start high,
+      - assert a row address on A0-A5, and
+      - hold write enable high for ASIC->Memory writing and low for Memory->ASIC reading.
+      When reading, the memory will output a tile from the selected row on the data lines, starting at the left column.
+      When the continue signal is held high across a clock edge, the memory will move on to the next column.
+      Writing works similarly except the ASIC asserts a tile to be stored at increasing columns.
+
 
 # Instructions on how someone could test your project, include things like what buttons do what and how to set the clock if needed
   how_to_test:  |
-      Explain how to test your project
+      You'll need:
+      - several buttons
+      - some kind of (very fast!!) external memory simulator (a Teensy 4.1 or an FPGA), and
+      - a few resistors for the VGA output.
+
+      Connect HSync and VSync on the VGA output directly to the HSync/VSync pins on a VGA connector.
+      For the red, green, and blue pins, be sure to add a series resistor between them and the connector.
+      VGA signals have 75-ohm termination, so at 3.3V gpio a 270ohm or larger resistor will limit the signal
+      to the appropriate 0.7V level.
+      Note that 800x600@72Hz is very unusual. It worked on all (read: the single) VGA monitors I tested,
+      and didn't work on all (read: the single) VGA->HDMI adapters I tested.
+
+      The buttons can be connected to the appropriate inputs with simple pulldowns.
+      Debouncing is done internally.
+
+      For the memory interface, follow the steps in
+      [the memory interface repo](https://github.com/SuperTails/cleary-line-peripheral).
+
+      Now you should be able to play the game! Press any button to start after a game over.
+
+      If you can see the falling piece and the grid, but pieces disappear after hitting the bottom
+      or pieces appear at random in the grid, there's likely a problem with the memory interface.
+
+
 
 # A description of what the inputs do (e.g. red button, SPI CLK, SPI MOSI, etc).
   inputs:               
@@ -66,7 +125,7 @@ documentation:
     - A4
     - A5
     - none
-    - none
+    - Memory Clock (always output)
 
 # The following fields are optional
   tag:          ""      # comma separated list of tags: test, encryption, experiment, clock, animation, utility, industrial, pwm, fpga, alu, microprocessor, risc, riscv, sensor, signal generator, fft, filter, music, bcd, sound, serial, timer, random number generator, calculator, decoder, counter, puzzle, multiplier, game, oscillator,
